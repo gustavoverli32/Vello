@@ -1,5 +1,5 @@
 (() => {
- const $=s=>document.querySelector(s),nonce=new URLSearchParams(location.hash.slice(1)).get('transfer');
+ const $=s=>document.querySelector(s),nonce=new URLSearchParams(location.hash.slice(1)).get('transfer'),destination=window.opener||(window.parent!==window?window.parent:null);
  const origins=new Set(['https://vellosolutions.com.br','https://www.vellosolutions.com.br']);
  let recipient=null,payload=null,sending=false;const attachments=new Set();
  try{
@@ -12,14 +12,14 @@
    $('#files').textContent=attachments.size+' anexo(s) local(is) para conferir.';
   }else $('#summary').textContent='Nenhum projeto salvo neste navegador. Abra esta transferência no navegador onde você usava a central antiga.';
  }catch{$('#summary').textContent='Não foi possível ler os dados salvos. A central antiga foi preservada.';}
- function send(message){if(recipient)window.opener.postMessage({...message,nonce},recipient);}
+ function send(message){if(recipient&&destination)destination.postMessage({...message,nonce},recipient);}
  async function readFile(id){
   if(!attachments.has(id))throw new Error('Arquivo fora da transferência.');
   const db=await new Promise((resolve,reject)=>{const req=indexedDB.open('emrys_files',1);req.onupgradeneeded=()=>{req.transaction.abort();reject(new Error('Armazenamento de anexos não encontrado.'));};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(new Error('Anexo não encontrado neste navegador.'));});
   try{return await new Promise((resolve,reject)=>{const req=db.transaction('blobs','readonly').objectStore('blobs').get(id);req.onsuccess=()=>req.result?resolve(req.result):reject(new Error('Anexo não encontrado neste navegador.'));req.onerror=()=>reject(new Error('Não foi possível ler o anexo.'));});}finally{db.close();}
  }
  window.addEventListener('message',async event=>{
-  if(!nonce||!window.opener||event.source!==window.opener||!origins.has(event.origin)||event.data?.nonce!==nonce)return;
+  if(!nonce||!destination||event.source!==destination||!origins.has(event.origin)||event.data?.nonce!==nonce)return;
   const message=event.data;
   if(message.type==='vello-transfer-connect'){
    recipient=event.origin;$('#transfer').disabled=!payload?.projects.length;
@@ -35,5 +35,5 @@
   }
  });
  $('#transfer').addEventListener('click',()=>{if(!payload||!recipient||sending)return;sending=true;$('#transfer').disabled=true;$('#status').textContent='Transferindo para sua área privada…';send({type:'vello-transfer-data',payload});});
- if(window.opener&&nonce){for(const origin of origins)window.opener.postMessage({type:'vello-transfer-ready',nonce},origin);}
+ if(destination&&nonce){for(const origin of origins)destination.postMessage({type:'vello-transfer-ready',nonce},origin);}
 })();
