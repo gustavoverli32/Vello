@@ -1,7 +1,7 @@
 (() => {
- const $=s=>document.querySelector(s),nonce=new URLSearchParams(location.hash.slice(1)).get('transfer'),destination=window.opener||(window.parent!==window?window.parent:null);
+ const $=s=>document.querySelector(s);
  const origins=new Set(['https://vellosolutions.com.br','https://www.vellosolutions.com.br']);
- let recipient=null,payload=null,sending=false;const attachments=new Set();
+ let payload=null;const attachments=new Set();
  try{
   const data=JSON.parse(localStorage.getItem('emrys_data_v1')||'null');
   if(data&&Array.isArray(data.projects)){
@@ -12,28 +12,27 @@
    $('#files').textContent=attachments.size+' anexo(s) local(is) para conferir.';
   }else $('#summary').textContent='Nenhum projeto salvo neste navegador. Abra esta transferência no navegador onde você usava a central antiga.';
  }catch{$('#summary').textContent='Não foi possível ler os dados salvos. A central antiga foi preservada.';}
- function send(message){if(recipient&&destination)destination.postMessage({...message,nonce},recipient);}
  async function readFile(id){
   if(!attachments.has(id))throw new Error('Arquivo fora da transferência.');
   const db=await new Promise((resolve,reject)=>{const req=indexedDB.open('emrys_files',1);req.onupgradeneeded=()=>{req.transaction.abort();reject(new Error('Armazenamento de anexos não encontrado.'));};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(new Error('Anexo não encontrado neste navegador.'));});
   try{return await new Promise((resolve,reject)=>{const req=db.transaction('blobs','readonly').objectStore('blobs').get(id);req.onsuccess=()=>req.result?resolve(req.result):reject(new Error('Anexo não encontrado neste navegador.'));req.onerror=()=>reject(new Error('Não foi possível ler o anexo.'));});}finally{db.close();}
  }
- window.addEventListener('message',async event=>{
-  if(!nonce||!destination||event.source!==destination||!origins.has(event.origin)||event.data?.nonce!==nonce)return;
-  const message=event.data;
-  if(message.type==='vello-transfer-connect'){
-   recipient=event.origin;$('#transfer').disabled=!payload?.projects.length;
-   $('#transfer').textContent=payload?.projects.length?'Transferir '+payload.projects.length+' projeto(s)':'Nenhum dado para transferir';
-   send({type:'vello-transfer-summary',count:payload?.projects.length||0,files:attachments.size});
-  }
-  if(message.type==='vello-transfer-file'&&sending&&recipient===event.origin){
-   try{send({type:'vello-transfer-file-result',requestId:message.requestId,file:await readFile(message.id)});}catch(e){send({type:'vello-transfer-file-result',requestId:message.requestId,error:e.message});}
-  }
-  if(message.type==='vello-transfer-result'&&recipient===event.origin){
-   $('#status').textContent=message.message;$('#transfer').disabled=message.ok; sending=false;
-   if(message.ok)$('#transfer').textContent='Transferência concluída';
-  }
+
+ $('#export').disabled=!payload?.projects.length;
+ $('#export').addEventListener('click',async()=>{
+  const button=$('#export');button.disabled=true;
+  try{
+   const files=[],missing=[];let bytes=0;
+   for(const id of attachments){
+    let blob;try{blob=await readFile(id);}catch{missing.push(id);continue;}
+    bytes+=blob.size;if(bytes>157286400)throw new Error('Os anexos excedem 150 MB. Transfira-os separadamente.');
+    const base64=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result).split(',')[1]);r.onerror=()=>reject(new Error('Não foi possível ler o anexo.'));r.readAsDataURL(blob);});
+    files.push({id,type:blob.type||'application/octet-stream',base64});
+    $('#status').textContent='Preparando anexos: '+files.length+' de '+attachments.size;
+   }
+   const blob=new Blob([JSON.stringify({format:'vello-project-backup-v1',payload,files,missing})],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+   a.href=url;a.download='vello-projetos-'+new Date().toISOString().slice(0,10)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);
+   $('#status').textContent='Cópia preparada com '+payload.projects.length+' projeto(s) e '+files.length+' anexo(s). Na área privada, clique em “Importar cópia”.'+(missing.length?' '+missing.length+' anexo(s) não foram encontrados neste navegador.':'');
+  }catch(e){$('#status').textContent=e.message;}finally{button.disabled=false;}
  });
- $('#transfer').addEventListener('click',()=>{if(!payload||!recipient||sending)return;sending=true;$('#transfer').disabled=true;$('#status').textContent='Transferindo para sua área privada…';send({type:'vello-transfer-data',payload});});
- if(destination&&nonce){for(const origin of origins)destination.postMessage({type:'vello-transfer-ready',nonce},origin);}
 })();
